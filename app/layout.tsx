@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { Poppins } from "next/font/google";
+import { Open_Sans } from "next/font/google";
 import "./globals.css";
 
-const poppins = Poppins({
-  variable: "--font-poppins",
+const opensans = Open_Sans({
+  variable: "--font-opensans",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
 });
@@ -17,7 +17,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${poppins.variable} font-black h-full antialiased`}
+      className={`${opensans.variable} font-black h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

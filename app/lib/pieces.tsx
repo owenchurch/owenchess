@@ -20,7 +20,7 @@ export const customPieces: PieceRenderObject = Object.fromEntries(
     code,
     () => (
       <img
-        src={`/pieces/${code}.svg`}
+        src={`/pieces/${code}.png`}
         style={{ width: "100%", height: "100%" }}
         alt={code}
       />
