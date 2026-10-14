@@ -1,20 +1,19 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Chess, type Square } from "chess.js";
 import {
   Chessboard,
-  PieceHandlerArgs,
-  SquareHandlerArgs,
+  type PieceHandlerArgs,
+  type SquareHandlerArgs,
 } from "react-chessboard";
 import { customPieces } from "../lib/pieces";
+import { parseOpeningLines, type OpeningLine } from "../lib/openings";
 
 export default function ChessBoard() {
   const [game, setGame] = useState(new Chess());
 
   const [moveFrom, setMoveFrom] = useState<string>("");
-  const [optionSquares, setOptionSquares] = useState<
-    Record<string, React.CSSProperties>
-  >({});
+  const [optionSquares, setOptionSquares] = useState({});
 
   const [lastMove, setLastMove] = useState<{ from: string; to: string } | null>(
     null,
@@ -25,6 +24,111 @@ export default function ChessBoard() {
         [lastMove.to]: { backgroundColor: "rgba(144, 213, 255, 0.4)" },
       }
     : {};
+
+  const [dragActivationDistance, setDragActivationDistance] = useState(1);
+
+  const [openingLines, setOpeningLines] = useState<OpeningLine[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [currentLine, setCurrentLine] = useState<OpeningLine | null>(null);
+  const [moveIndex, setMoveIndex] = useState(0);
+  const [isThinking, setIsThinking] = useState(false);
+  const [lineComplete, setLineComplete] = useState(false);
+
+  useEffect(() => {
+    async function loadOpeningLines() {
+      try {
+        const response = await fetch("/openings/vienna.txt");
+
+        if (!response.ok) {
+          throw new Error("Failed to load Vienna opening lines");
+        }
+
+        const text = await response.text();
+        const lines = parseOpeningLines(text);
+
+        setOpeningLines(lines);
+      } catch (error) {
+        console.error(error);
+        setLoadError("Could not load Vienna opening lines.");
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadOpeningLines();
+  }, []);
+
+  function startSession() {
+    if (loading || openingLines.length === 0) return;
+
+    const randomIndex = Math.floor(Math.random() * openingLines.length);
+    const selectedLine = openingLines[randomIndex];
+
+    setLineComplete(false);
+    setCurrentLine(selectedLine);
+    setMoveIndex(0);
+    setGame(new Chess());
+    setLastMove(null);
+    setMoveFrom("");
+    setOptionSquares({});
+    setSquareStyles({});
+  }
+
+  function tryUserMove(from: string, to: string): boolean {
+    if (!currentLine || isThinking) return false;
+
+    const gameCopy = new Chess(game.fen());
+
+    let move;
+
+    try {
+      move = gameCopy.move({
+        from,
+        to,
+        promotion: "q",
+      });
+    } catch {
+      return false;
+    }
+
+    if (move.san !== currentLine.moves[moveIndex]) {
+      return false;
+    }
+
+    let lastMovePlayed = move;
+    let nextIndex = moveIndex + 1;
+
+    setGame(gameCopy);
+    setMoveIndex(nextIndex);
+    setLastMove({
+      from: lastMovePlayed.from,
+      to: lastMovePlayed.to,
+    });
+    setMoveFrom("");
+    setOptionSquares({});
+    setSquareStyles({});
+
+    if (moveIndex + 1 < currentLine.moves.length) {
+      setIsThinking(true);
+
+      setTimeout(() => {
+        const nextGame = new Chess(gameCopy.fen());
+        const blackMove = nextGame.move(currentLine.moves[moveIndex + 1]);
+
+        setGame(nextGame);
+        setLastMove({
+          from: blackMove.from,
+          to: blackMove.to,
+        });
+        setMoveIndex(moveIndex + 2);
+        setIsThinking(false);
+      }, 500);
+    } else {
+      setLineComplete(true);
+    }
+    return true;
+  }
 
   function getMoveOptions(square: Square) {
     const moves = game.moves({ square, verbose: true });
@@ -46,6 +150,7 @@ export default function ChessBoard() {
   }
 
   function onPieceDrag({ square }: PieceHandlerArgs) {
+    setSquareStyles({});
     if (!square) return;
     if (moveFrom !== square) {
       getMoveOptions(square as Square);
@@ -62,18 +167,7 @@ export default function ChessBoard() {
   }) {
     if (!targetSquare) return false;
 
-    const gameCopy = new Chess(game.fen());
-    try {
-      gameCopy.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
-    } catch {
-      return false;
-    }
-
-    setGame(gameCopy);
-    setLastMove({ from: sourceSquare, to: targetSquare });
-    setMoveFrom("");
-    setOptionSquares({});
-    return true;
+    return tryUserMove(sourceSquare, targetSquare);
   }
 
   const defaultArrowOptions = {
@@ -103,6 +197,7 @@ export default function ChessBoard() {
   >({});
 
   function onSquareClick({ square, piece }: SquareHandlerArgs) {
+    setSquareStyles({});
     if (moveFrom === square) {
       setMoveFrom("");
       setOptionSquares({});
@@ -132,12 +227,7 @@ export default function ChessBoard() {
       return;
     }
 
-    const gameCopy = new Chess(game.fen());
-    gameCopy.move({ from: moveFrom, to: square, promotion: "q" });
-    setGame(gameCopy);
-    setLastMove({ from: moveFrom, to: square });
-    setMoveFrom("");
-    setOptionSquares({});
+    tryUserMove(moveFrom, square);
   }
 
   function onSquareRightClick(args: SquareHandlerArgs) {
@@ -188,14 +278,46 @@ export default function ChessBoard() {
     dropSquareStyle: {
       boxShadow: "inset 0px 0px 0px 6px #ffffff50",
     },
+    dragActivationDistance,
+    animationDurationInMs: 200,
     arrowOptions,
     onSquareClick,
     onSquareRightClick,
     onPieceDrag,
     onPieceDrop,
-    squareStyles: { ...lastMoveSquares, ...squareStyles, ...optionSquares },
+    squareStyles: { ...lastMoveSquares, ...optionSquares, ...squareStyles },
     pieces: customPieces,
   };
 
-  return <Chessboard options={chessboardOptions} />;
+  return (
+    <div>
+      <button
+        onClick={startSession}
+        className="btn m-2 absolute rounded-2xl border-none shadow-none bg-blue-500 hover:bg-blue-400"
+        disabled={loading}
+      >
+        start practice
+      </button>
+      {lineComplete && (
+        <div className="absolute inset-0 place-self-center p-5 bg-blue-500 text-white rounded-3xl z-100">
+          opening line complete!
+        </div>
+      )}
+      <div
+        style={{
+          backgroundImage: "url(/boards/icy-sea.png)",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          borderRadius: "10px",
+          overflow: "hidden",
+          width: 900,
+          height: 900,
+          margin: "auto",
+          marginTop: 20,
+        }}
+      >
+        <Chessboard options={chessboardOptions} />
+      </div>
+    </div>
+  );
 }
