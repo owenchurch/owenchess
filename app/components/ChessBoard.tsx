@@ -34,6 +34,11 @@ export default function ChessBoard() {
   const [moveIndex, setMoveIndex] = useState(0);
   const [isThinking, setIsThinking] = useState(false);
   const [lineComplete, setLineComplete] = useState(false);
+  const [wrongMoveSquare, setWrongMoveSquare] = useState<string | null>(null);
+
+  const wrongMoveSquares: Record<string, React.CSSProperties> = wrongMoveSquare
+    ? { [wrongMoveSquare]: { backgroundColor: "rgba(255, 0, 0, 0.2)" } }
+    : {};
 
   useEffect(() => {
     async function loadOpeningLines() {
@@ -59,8 +64,40 @@ export default function ChessBoard() {
     loadOpeningLines();
   }, []);
 
+  function playSound(file: string) {
+    const audio = new Audio(`/sounds/${file}.mp3`);
+    audio.play().catch(() => {});
+  }
+
+  function playMoveSound(
+    move: { captured?: string; flags: string },
+    chessInstance: Chess,
+    isOpponent: boolean,
+  ) {
+    console.log("playMoveSound", {
+      captured: move.captured,
+      flags: move.flags,
+      inCheck: chessInstance.inCheck(),
+      isGameOver: chessInstance.isGameOver(),
+      isOpponent,
+    });
+    if (chessInstance.isGameOver()) {
+      playSound("game-end");
+    } else if (move.flags.includes("k") || move.flags.includes("q")) {
+      playSound("castle");
+    } else if (chessInstance.inCheck()) {
+      playSound("move-check");
+    } else if (move.captured) {
+      playSound("capture");
+    } else {
+      playSound(isOpponent ? "move-opponent" : "move-self");
+    }
+  }
+
   function startSession() {
     if (loading || openingLines.length === 0) return;
+
+    playSound("game-start");
 
     const randomIndex = Math.floor(Math.random() * openingLines.length);
     const selectedLine = openingLines[randomIndex];
@@ -76,7 +113,7 @@ export default function ChessBoard() {
   }
 
   function tryUserMove(from: string, to: string): boolean {
-    if (!currentLine || isThinking) return false;
+    if (!currentLine || isThinking || lineComplete) return false;
 
     const gameCopy = new Chess(game.fen());
 
@@ -93,8 +130,13 @@ export default function ChessBoard() {
     }
 
     if (move.san !== currentLine.moves[moveIndex]) {
+      playSound("illegal");
+      setWrongMoveSquare(from);
+      setTimeout(() => setWrongMoveSquare(null), 500);
       return false;
     }
+
+    playMoveSound(move, gameCopy, false);
 
     let lastMovePlayed = move;
     let nextIndex = moveIndex + 1;
@@ -115,6 +157,7 @@ export default function ChessBoard() {
       setTimeout(() => {
         const nextGame = new Chess(gameCopy.fen());
         const blackMove = nextGame.move(currentLine.moves[moveIndex + 1]);
+        playMoveSound(blackMove, nextGame, true);
 
         setGame(nextGame);
         setLastMove({
@@ -285,7 +328,12 @@ export default function ChessBoard() {
     onSquareRightClick,
     onPieceDrag,
     onPieceDrop,
-    squareStyles: { ...lastMoveSquares, ...optionSquares, ...squareStyles },
+    squareStyles: {
+      ...lastMoveSquares,
+      ...optionSquares,
+      ...wrongMoveSquares,
+      ...squareStyles,
+    },
     pieces: customPieces,
   };
 
